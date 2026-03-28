@@ -6,7 +6,7 @@ This project is a full-stack, multi-modal Retrieval-Augmented Generation (RAG) a
 The backend (FastAPI + Celery + Redis) is fully containerized with Docker and was deployed to AWS ECS via ECR. The frontend (Next.js + Clerk) is hosted on Vercel, with Supabase serving as the managed vector database in production. LangSmith provides end-to-end agent trace observability across the entire pipeline.
 Key capabilities: multi-agent coordination · hybrid vector + keyword retrieval · multi-modal ingestion (PDFs, images, tables, web) · async document processing · input guardrails · citation tracking · RAGAS evaluation
 
-
+Mutli-agent supervisor flow:
 ```mermaid
 flowchart TD
     A([START]) --> B[Input guardrail\nToxicity · PII · injection]
@@ -17,4 +17,49 @@ flowchart TD
     D --> F[Synthesized response + citations]
     E --> F
     F --> G([END])
+```
+
+
+Production infrastructure
+```mermaid
+graph LR
+    U([User]) --> V[Vercel\nNext.js frontend]
+    V --> ECS
+    subgraph ECS [AWS ECS via ECR]
+        API[FastAPI] --> W[Celery worker]
+        W --> R[Redis broker]
+        R --> W
+    end
+    ECS --> S3[AWS S3\nDocument storage]
+    ECS --> SB[Supabase\npgvector · Postgres]
+    ECS --> LS[LangSmith\nTrace observability]
+    CL[Clerk\nAuth & webhooks] --> V
+    CL -.-> ECS
+```
+
+End-to-end request lifecycle:
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as Next.js (Vercel)
+    participant Guard as Guardrail node
+    participant Sup as Supervisor agent
+    participant RAG as RAG sub-agent
+    participant DB as Supabase pgvector
+    participant LLM as GPT-4o
+    participant LS as LangSmith
+
+    User->>UI: Submit query
+    UI->>Guard: Forward request
+    Guard-->>UI: Blocked (unsafe)
+    Guard->>Sup: Pass (safe)
+    Sup->>RAG: Route docs query
+    RAG->>DB: Hybrid retrieval
+    DB-->>RAG: Ranked chunks
+    RAG->>LLM: Generate answer
+    LLM-->>RAG: Response + citations
+    RAG-->>Sup: Synthesize
+    Sup-->>UI: Final answer
+    UI-->>User: Render response
+    LLM--)LS: Trace logged
 ```
